@@ -127,3 +127,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Race Bib Numbering-specific
+images/*
+test_images/*
+main.ipynb
