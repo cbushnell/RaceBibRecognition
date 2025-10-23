@@ -1,30 +1,33 @@
 """
-OCR module for detecting and refining bib numbers using Florence-2
+OCR module for detecting and refining bib numbers using EasyOCR
 """
 
 import re
-import torch
+import easyocr
 from PIL import Image
-from transformers import AutoProcessor, AutoModelForImageTextToText
+import numpy as np
 
 
 class BibOCR:
-    """Handles OCR operations for bib number detection"""
+    """Handles OCR operations for bib number detection using EasyOCR"""
 
-    def __init__(self, model_name="ducviet00/Florence-2-large-hf"):
+    def __init__(self, languages=['en'], gpu=True, bib_range=None, min_bib_confidence=0.5):
         """
         Initialize the OCR model
 
         Args:
-            model_name: HuggingFace model name for Florence-2
+            languages: List of language codes for EasyOCR (default: ['en'])
+            gpu: Whether to use GPU acceleration if available (default: True)
         """
-        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        self.torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
-        print(f"Loading OCR model on {self.device}...")
-        self.processor = AutoProcessor.from_pretrained(model_name)
-        self.model = AutoModelForImageTextToText.from_pretrained(model_name)
-        self.model.to(self.device)
+        print(f"Loading EasyOCR model with languages: {languages}...")
+        self.reader = easyocr.Reader(languages, gpu=gpu)
+        print("EasyOCR model loaded successfully")
+        self.min_bib_confidence = min_bib_confidence
+        print(f"Minimum OCR confidence set to {self.min_bib_confidence}")
+        self.bib_range = bib_range
+        if self.bib_range:
+            print(f"Only considering bibs in the range {self.bib_range[0]} to {self.bib_range[1]}")
+            
 
     def detect_text_regions(self, image):
         """
@@ -34,30 +37,38 @@ class BibOCR:
             image: PIL Image
 
         Returns:
-            Dictionary with quad_boxes and labels
+            Dictionary with quad_boxes, labels, and confidences (compatible with Florence-2 format)
         """
-        prompt = "<OCR_WITH_REGION>"
+        # Convert PIL Image to numpy array
+        img_array = np.array(image)
 
-        inputs = self.processor(text=prompt, images=image, return_tensors="pt").to(
-            self.device, self.torch_dtype
-        )
+        # Run EasyOCR detection
+        results = self.reader.readtext(img_array)
 
-        generated_ids = self.model.generate(
-            input_ids=inputs["input_ids"],
-            pixel_values=inputs["pixel_values"],
-            max_new_tokens=4096,
-            num_beams=3,
-            do_sample=False,
-        )
+        # Convert EasyOCR results to Florence-2 compatible format
+        quad_boxes = []
+        labels = []
+        confidences = []
 
-        generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        ocr_result = self.processor.post_process_generation(
-            generated_text, task=prompt, image_size=(image.width, image.height)
-        )
+        for detection in results:
+            bbox, text, confidence = detection
+            try:
+                if (
+                    (self.bib_range and int(text) in range(self.bib_range[0], self.bib_range[1] + 1)) or not self.bib_range
+                    and confidence >= self.min_bib_confidence
+                ):
+                    # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    # Flatten to [x1, y1, x2, y2, x3, y3, x4, y4]
+                    quad_box = [coord for point in bbox for coord in point]
+                    quad_boxes.append(quad_box)
+                    labels.append(text)
+                    confidences.append(confidence)
+            except:
+                continue
 
-        return ocr_result.get('<OCR_WITH_REGION>', {'quad_boxes': [], 'labels': []})
+        return {'quad_boxes': quad_boxes, 'labels': labels, 'confidences': confidences}
 
-    def refine_bib_number(self, image, bbox, original_number, scale_factor=4, min_size=200):
+    def refine_bib_number(self, image, bbox, original_number, confidence, scale_factor=4, min_size=200):
         """
         Refine a bib number reading by cropping and upscaling the region
 
@@ -65,17 +76,18 @@ class BibOCR:
             image: PIL Image (original full image)
             bbox: [x, y, w, h] bounding box of the bib
             original_number: Original OCR result
+            confidence: Confidence of model's OCR prediction
             scale_factor: How much to upscale the cropped region (default: 4x)
             min_size: Minimum dimension for the cropped region (default: 200px)
 
         Returns:
-            Tuple of (refined_bib_number, confidence_info) or (None, None) if refinement fails
+            refined_bib_number
         """
         try:
             x, y, w, h = bbox
 
-            # Add padding around the bib (20% on each side)
-            padding_x = int(w * 0.2)
+            # Add padding around the bib
+            padding_x = int(w * 0.4)
             padding_y = int(h * 0.2)
 
             # Calculate padded crop region
@@ -99,52 +111,29 @@ class BibOCR:
             new_height = int(cropped.height * adaptive_scale)
             upscaled = cropped.resize((new_width, new_height), Image.LANCZOS)
 
+            # Convert to numpy array for EasyOCR
+            upscaled_array = np.array(upscaled)
+
             # Run OCR on the upscaled region
-            prompt = "<OCR>"
-            inputs = self.processor(text=prompt, images=upscaled, return_tensors="pt").to(
-                self.device, self.torch_dtype
-            )
+            results = self.reader.readtext(upscaled_array)
 
-            generated_ids = self.model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=1024,
-                num_beams=3,
-                do_sample=False,
-            )
-
-            generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-            ocr_result = self.processor.post_process_generation(
-                generated_text, task=prompt, image_size=(upscaled.width, upscaled.height)
-            )
-
-            # Extract just the numbers from the OCR result
-            ocr_text = ocr_result.get('<OCR>', '')
-
-            # Try to find the largest number in the text
-            numbers = re.findall(r'\d+', ocr_text)
+            # Find all detected bib numbers matching defined criteria
+            numbers = [{'bbox': bbox, 'text': text, "conf": conf} for (bbox, text, conf) in results if self.bib_range and text.isnumeric() and int(text) in range(self.bib_range[0], self.bib_range[1] + 1)]
 
             if numbers:
-                # Return the longest number (likely the bib number)
-                bib_number = max(numbers, key=len)
+                max_confidence_number = max(numbers, key=lambda num: num['conf'])
 
-                # If the refined number is longer than the original, use it
-                if len(bib_number) > len(original_number):
-                    confidence_info = {
-                        'original_size': current_size,
-                        'upscaled_size': max(new_width, new_height),
-                        'ocr_text': ocr_text,
-                        'all_numbers_found': numbers
-                    }
-                    return bib_number, confidence_info
+                # If the model is more confident in the new detection, return it
+                if max_confidence_number['conf'] > confidence:
+                    return max_confidence_number['text']
 
-                return original_number, {'original_size': current_size}
+                return original_number
 
-            return None, None
+            return None
 
         except Exception as e:
             print(f"    Warning: Bib refinement failed: {e}")
-            return None, None
+            return None
 
 
 def quad_to_bbox(quad_box):
@@ -166,50 +155,3 @@ def quad_to_bbox(quad_box):
     h = max(y_coords) - y
 
     return [x, y, w, h]
-
-
-def calculate_bib_confidence(original_number, refined_number, bbox_size, refinement_info):
-    """
-    Calculate a confidence score for a bib number detection
-
-    Args:
-        original_number: Original OCR result
-        refined_number: Refined OCR result (after upscaling)
-        bbox_size: Size of the bib bounding box in pixels
-        refinement_info: Dictionary with refinement details (or None)
-
-    Returns:
-        confidence score (0.0 to 1.0)
-    """
-    confidence = 0.5  # Base confidence
-
-    # Factor 1: Size (larger bibs are more reliable)
-    size_score = min(bbox_size / 100.0, 1.0) * 0.3
-    confidence += size_score
-
-    # Factor 2: Consistency between original and refined
-    if refined_number and original_number == refined_number:
-        confidence += 0.2  # Consistent reading = higher confidence
-    elif refined_number and original_number != refined_number:
-        confidence -= 0.1  # Inconsistent = lower confidence
-
-    # Factor 3: Number length (typical bib numbers are 3-4 digits)
-    if refined_number:
-        num_length = len(refined_number)
-        if 3 <= num_length <= 5:
-            confidence += 0.15  # Typical length
-        elif num_length == 2:
-            confidence -= 0.05  # Too short, might be partial
-        elif num_length == 1:
-            confidence -= 0.15  # Very short, likely wrong
-        elif num_length > 5:
-            confidence -= 0.1   # Too long, might include extra digits
-
-    # Factor 4: Clean OCR text (fewer extraneous characters = better)
-    if refinement_info and isinstance(refinement_info, dict) and 'ocr_text' in refinement_info:
-        ocr_text = refinement_info['ocr_text']
-        if refined_number and len(ocr_text.strip()) <= len(refined_number) + 3:
-            confidence += 0.05
-
-    # Clamp to 0.0-1.0 range
-    return max(0.0, min(1.0, confidence))

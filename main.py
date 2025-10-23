@@ -8,6 +8,7 @@ Process race photos to detect and tag bib numbers using OCR and face recognition
 import sys
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
@@ -44,7 +45,7 @@ Examples:
     parser.add_argument(
         '--min-bib-confidence',
         type=float,
-        default=0.6,
+        default=0.5,
         help='Minimum confidence for bib OCR (default: 0.6)'
     )
 
@@ -66,7 +67,29 @@ Examples:
         help='Only write bib numbers associated with faces to metadata (exclude unassociated)'
     )
 
+    parser.add_argument(
+        '--bib-range',
+        type=str,
+        help='Only add bib numbers within the associated range to metadata. (ex. 3000-4000)'
+    )
+
+    parser.add_argument(
+        '--overwrite-metadata',
+        action='store_true',
+        help='Overwrite existing metadata instead of appending to it'
+    )
+
+    # Implement later
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Print the results of each step in the process'
+    )
+    
+
     args = parser.parse_args()
+
+    start_time = datetime.now()
 
     # Validate directory
     image_dir = Path(args.directory)
@@ -83,7 +106,8 @@ Examples:
     print("="*60)
     processor = BibRecognitionProcessor(
         min_face_confidence=args.min_face_confidence,
-        min_bib_confidence=args.min_bib_confidence
+        min_bib_confidence=args.min_bib_confidence,
+        bib_range=args.bib_range
     )
 
     # Process directory
@@ -92,13 +116,15 @@ Examples:
             str(image_dir),
             write_metadata=not args.no_metadata,
             cleanup=not args.no_cleanup,
-            include_all_detected_bibs=not args.only_associated_bibs
+            include_all_detected_bibs=not args.only_associated_bibs,
+            overwrite_metadata=args.overwrite_metadata
         )
 
         # Print final result
         print("\n" + "="*60)
         if result['success']:
             print("✓ Processing completed successfully!")
+            print(f"Time elapsed: {datetime.now() - start_time}")
             return 0
         else:
             print("⚠ Processing completed with errors")

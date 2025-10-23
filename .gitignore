@@ -131,4 +131,4 @@ dmypy.json
 # Race Bib Numbering-specific
 images/*
 test_images/*
-main.ipynb
+*.ipynb

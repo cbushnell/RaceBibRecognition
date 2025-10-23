@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from PIL import Image
 
-from .ocr import BibOCR, quad_to_bbox, calculate_bib_confidence
+from .ocr import BibOCR, quad_to_bbox
 from .face_detection import FaceDetector, associate_faces_with_bibs
 from .gallery import RunnerGallery
 from .metadata import write_bib_numbers_to_metadata, cleanup_artifacts
@@ -15,19 +15,22 @@ from .metadata import write_bib_numbers_to_metadata, cleanup_artifacts
 class BibRecognitionProcessor:
     """Main processor for race bib recognition"""
 
-    def __init__(self, min_face_confidence=0.8, min_bib_confidence=0.6):
+    def __init__(self, min_face_confidence=0.8, min_bib_confidence=0.5, bib_range=None):
         """
         Initialize the processor
 
         Args:
             min_face_confidence: Minimum confidence for face detection (default: 0.8)
             min_bib_confidence: Minimum confidence for bib OCR (default: 0.6)
+            bib_range: Range of values for bibs to be considered for adding (in numbers)
         """
-        self.ocr = BibOCR()
         self.face_detector = FaceDetector()
         self.gallery = RunnerGallery(threshold=0.4)
         self.min_face_confidence = min_face_confidence
         self.min_bib_confidence = min_bib_confidence
+        self.ocr = BibOCR(bib_range=[int(bib_range.split("-")[0]), int(bib_range.split("-")[1])] if bib_range else None,
+                          min_bib_confidence=self.min_bib_confidence)
+
 
     def process_image(self, image_path, refine_bibs=True):
         """
@@ -51,7 +54,7 @@ class BibRecognitionProcessor:
 
         # Extract and refine bib numbers from OCR results
         bib_boxes = []
-        for quad_box, label in zip(ocr_result['quad_boxes'], ocr_result['labels']):
+        for quad_box, label, confidence in zip(ocr_result['quad_boxes'], ocr_result['labels'], ocr_result['confidences']):
             if label.isdigit():
                 bbox = quad_to_bbox(quad_box)
                 bib_size = max(bbox[2], bbox[3])
@@ -61,29 +64,18 @@ class BibRecognitionProcessor:
                     'bbox': bbox,
                     'original_number': label,
                     'size': bib_size,
-                    'confidence_info': None,
-                    'confidence_score': None
+                    'confidence': confidence
                 })
 
         # Refine bib numbers if requested
         if refine_bibs and len(bib_boxes) > 0:
             for bib in bib_boxes:
-                refined, confidence_info = self.ocr.refine_bib_number(
-                    img, bib['bbox'], bib['original_number']
+                refined_number = self.ocr.refine_bib_number(
+                    img, bib['bbox'], bib['original_number'], bib['confidence']
                 )
-                bib['confidence_info'] = confidence_info
 
-                # Calculate confidence score
-                bib_conf_score = calculate_bib_confidence(
-                    bib['original_number'],
-                    refined if refined else bib['original_number'],
-                    bib['size'],
-                    confidence_info
-                )
-                bib['confidence_score'] = bib_conf_score
-
-                if refined and refined != bib['original_number']:
-                    bib['number'] = refined
+                if refined_number and refined_number != bib['original_number']:
+                    bib['number'] = refined_number
 
         # Associate faces with bib numbers
         associations = associate_faces_with_bibs(
@@ -119,7 +111,7 @@ class BibRecognitionProcessor:
         }
 
     def process_directory(self, image_dir, write_metadata=True, cleanup=True,
-                         include_all_detected_bibs=True):
+                         include_all_detected_bibs=True, overwrite_metadata=False):
         """
         Process all images in a directory
 
@@ -128,6 +120,7 @@ class BibRecognitionProcessor:
             write_metadata: Write bib numbers to IPTC metadata (default: True)
             cleanup: Clean up artifact files after processing (default: True)
             include_all_detected_bibs: Include all detected bibs in metadata (default: True)
+            overwrite_metadata: Overwrite existing metadata instead of appending (default: False)
 
         Returns:
             Dictionary with success status and statistics
@@ -220,7 +213,7 @@ class BibRecognitionProcessor:
                         bib_numbers,
                         metadata_field='keywords',
                         backup=True,
-                        overwrite=False
+                        overwrite=overwrite_metadata
                     )
 
                     if success:

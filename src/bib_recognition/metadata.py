@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def write_bib_numbers_to_metadata(image_path, bib_numbers, metadata_field='keywords',
-                                   backup=True, overwrite=False):
+                                   backup=False, overwrite=False):
     """
     Write bib numbers to image IPTC metadata
 
@@ -34,7 +34,7 @@ def write_bib_numbers_to_metadata(image_path, bib_numbers, metadata_field='keywo
         # Load IPTC info
         info = IPTCInfo(image_path, force=True)
 
-        # Prepare bib numbers as tags (just the numbers, no prefix)
+        # Prepare bib numbers as tags
         bib_tags = [str(bib) for bib in bib_numbers if bib]
 
         if not bib_tags:
@@ -102,15 +102,12 @@ def read_bib_numbers_from_metadata(image_path, metadata_field='keywords'):
         else:
             data = info[iptc_field] if info[iptc_field] else []
 
-        # Extract bib numbers (now they're just plain numbers, no prefix)
+        # Extract bib numbers
         bib_numbers = []
         for item in data:
             item_str = str(item) if not isinstance(item, str) else item
-            # Check if it's a number (could be from old "Bib_" format or new plain format)
-            if item_str.startswith('Bib_'):
-                # Old format compatibility
-                bib_numbers.append(item_str.replace('Bib_', ''))
-            elif item_str.isdigit():
+            # Check if it's a number 
+            if item_str.isdigit():
                 # New format - just the number
                 bib_numbers.append(item_str)
 
