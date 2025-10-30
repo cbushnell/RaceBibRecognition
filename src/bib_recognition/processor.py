@@ -110,7 +110,7 @@ class BibRecognitionProcessor:
             'identifications': identifications
         }
 
-    def process_directory(self, image_dir, write_metadata=True, cleanup=True,
+    def process_directory(self, image_dir, write_metadata=True,
                          include_all_detected_bibs=True, overwrite_metadata=False):
         """
         Process all images in a directory
@@ -118,7 +118,6 @@ class BibRecognitionProcessor:
         Args:
             image_dir: Path to directory containing images
             write_metadata: Write bib numbers to IPTC metadata (default: True)
-            cleanup: Clean up artifact files after processing (default: True)
             include_all_detected_bibs: Include all detected bibs in metadata (default: True)
             overwrite_metadata: Overwrite existing metadata instead of appending (default: False)
 
@@ -221,14 +220,14 @@ class BibRecognitionProcessor:
                         metadata_written += 1
 
         # Cleanup artifacts
-        deleted_count = 0
-        if cleanup:
-            print(f"\n{'='*60}")
-            print("CLEANUP")
-            print(f"{'='*60}")
-            deleted_count = cleanup_artifacts(image_dir)
-            if deleted_count > 0:
-                print(f"  ✓ Deleted {deleted_count} artifact file(s)")
+        print(f"\n{'='*60}")
+        print("CLEANUP")
+        print(f"{'='*60}")
+        deleted_count = cleanup_artifacts(image_dir)
+        if deleted_count > 0:
+            print(f"  ✓ Deleted {deleted_count} artifact file(s)")
+        else:
+            print(f"  ✓ No artifact files to clean up")
 
         # Final statistics
         print(f"\n{'='*60}")

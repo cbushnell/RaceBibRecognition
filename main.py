@@ -56,12 +56,6 @@ Examples:
     )
 
     parser.add_argument(
-        '--no-cleanup',
-        action='store_true',
-        help='Skip cleanup of artifact files (.bak, ~, .tmp)'
-    )
-
-    parser.add_argument(
         '--only-associated-bibs',
         action='store_true',
         help='Only write bib numbers associated with faces to metadata (exclude unassociated)'
@@ -115,7 +109,6 @@ Examples:
         result = processor.process_directory(
             str(image_dir),
             write_metadata=not args.no_metadata,
-            cleanup=not args.no_cleanup,
             include_all_detected_bibs=not args.only_associated_bibs,
             overwrite_metadata=args.overwrite_metadata
         )
