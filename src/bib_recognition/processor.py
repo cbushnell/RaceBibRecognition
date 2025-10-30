@@ -32,13 +32,14 @@ class BibRecognitionProcessor:
                           min_bib_confidence=self.min_bib_confidence)
 
 
-    def process_image(self, image_path, refine_bibs=True):
+    def process_image(self, image_path, refine_bibs=True, skip_gallery_ops=False):
         """
         Process a single image to detect faces and bib numbers
 
         Args:
             image_path: Path to the image file
             refine_bibs: Whether to refine bib numbers by upscaling (default: True)
+            skip_gallery_ops: Skip gallery identification (used for batch processing, default: False)
 
         Returns:
             Dictionary with processing results
@@ -87,20 +88,31 @@ class BibRecognitionProcessor:
             self.min_bib_confidence
         )
 
-        # Identify runners from gallery
-        identifications = []
-        for assoc in associations:
-            if assoc['face']['embedding'] is not None:
-                bib_from_gallery, distance = self.gallery.identify_runner(
-                    assoc['face']['embedding']
-                )
+        # Identify runners from gallery using batch operation (unless skipped for batch processing)
+        if skip_gallery_ops:
+            identifications = []
+        else:
+            embeddings = [assoc['face']['embedding'] for assoc in associations if assoc['face']['embedding'] is not None]
 
-                identifications.append({
-                    'face_bbox': assoc['face']['bbox'],
-                    'bib_from_ocr': assoc['bib_number'],
-                    'bib_from_gallery': bib_from_gallery,
-                    'match_distance': distance
-                })
+            if embeddings:
+                # Batch identify all faces at once
+                gallery_results = self.gallery.identify_runner(embeddings)
+
+                # Build identifications with results
+                identifications = []
+                result_idx = 0
+                for assoc in associations:
+                    if assoc['face']['embedding'] is not None:
+                        bib_from_gallery, distance = gallery_results[result_idx]
+                        identifications.append({
+                            'face_bbox': assoc['face']['bbox'],
+                            'bib_from_ocr': assoc['bib_number'],
+                            'bib_from_gallery': bib_from_gallery,
+                            'match_distance': distance
+                        })
+                        result_idx += 1
+            else:
+                identifications = []
 
         return {
             'image': img,
@@ -142,41 +154,71 @@ class BibRecognitionProcessor:
         print(f"Found {len(image_files)} image(s) to process")
         print("="*60)
 
-        # Process all images
+        # Process all images (OCR + face detection only, no gallery operations yet)
         all_results = []
         errors = []
 
         for idx, img_path in enumerate(image_files, 1):
             try:
                 print(f"\n[{idx}/{len(image_files)}] Processing {Path(img_path).name}...")
-                result = self.process_image(img_path, refine_bibs=True)
+                result = self.process_image(img_path, refine_bibs=True, skip_gallery_ops=True)
                 all_results.append(result)
-
-                # Add associations to gallery
-                self.gallery.add_associations(result['associations'])
 
             except Exception as e:
                 error_msg = f"Error processing {Path(img_path).name}: {e}"
                 print(f"  ✗ {error_msg}")
                 errors.append(error_msg)
 
-        # Retroactive identification pass
+        # Batch gallery operations across ALL images
+        print(f"\n{'='*60}")
+        print("GALLERY OPERATIONS (BATCH)")
+        print(f"{'='*60}")
+
+        # Collect all associations from all images
+        all_associations = []
+        for result in all_results:
+            all_associations.extend(result['associations'])
+
+        # Add all associations to gallery in one batch
+        if all_associations:
+            print(f"Adding {len(all_associations)} face-bib associations to gallery...")
+            self.gallery.add_associations(all_associations)
+
+        # Retroactive identification pass - identify all unidentified faces in one batch
         if self.gallery.get_runner_count() > 0:
             print(f"\n{'='*60}")
             print("RETROACTIVE IDENTIFICATION PASS")
             print(f"{'='*60}")
 
-            for result in all_results:
-                for assoc in result['associations']:
-                    if not assoc['bib_number'] and assoc['face']['embedding']:
-                        bib_from_gallery, distance = self.gallery.identify_runner(
-                            assoc['face']['embedding']
-                        )
+            # Collect all unidentified faces across all results for batch processing
+            unidentified_faces = []
+            face_to_assoc_map = []  # Maps batch result index to (result_idx, assoc_idx)
 
-                        if bib_from_gallery:
-                            assoc['bib_number'] = bib_from_gallery
-                            assoc['retroactive_match'] = True
-                            assoc['match_distance'] = distance
+            for result_idx, result in enumerate(all_results):
+                for assoc_idx, assoc in enumerate(result['associations']):
+                    if not assoc['bib_number'] and assoc['face']['embedding']:
+                        unidentified_faces.append(assoc['face']['embedding'])
+                        face_to_assoc_map.append((result_idx, assoc_idx))
+
+            # Batch identify all unidentified faces at once
+            if unidentified_faces:
+                print(f"Identifying {len(unidentified_faces)} unidentified faces...")
+                gallery_results = self.gallery.identify_runner(unidentified_faces)
+
+                # Update associations with batch results
+                matches_found = 0
+                for i, (bib_from_gallery, distance) in enumerate(gallery_results):
+                    if bib_from_gallery:
+                        result_idx, assoc_idx = face_to_assoc_map[i]
+                        assoc = all_results[result_idx]['associations'][assoc_idx]
+                        assoc['bib_number'] = bib_from_gallery
+                        assoc['retroactive_match'] = True
+                        assoc['match_distance'] = distance
+                        matches_found += 1
+
+                print(f"  ✓ Found {matches_found} retroactive matches")
+            else:
+                print("  ✓ No unidentified faces to process")
 
         # Write metadata to images
         metadata_written = 0

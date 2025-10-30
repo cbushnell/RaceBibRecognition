@@ -43,7 +43,7 @@ class BibOCR:
         img_array = np.array(image)
 
         # Run EasyOCR detection
-        results = self.reader.readtext(img_array)
+        results = self.reader.readtext(img_array, contrast_ths=0.4)
 
         # Convert EasyOCR results to Florence-2 compatible format
         quad_boxes = []
@@ -115,7 +115,7 @@ class BibOCR:
             upscaled_array = np.array(upscaled)
 
             # Run OCR on the upscaled region
-            results = self.reader.readtext(upscaled_array)
+            results = self.reader.readtext(upscaled_array, contrast_ths=0.4)
 
             # Find all detected bib numbers matching defined criteria
             numbers = [{'bbox': bbox, 'text': text, "conf": conf} for (bbox, text, conf) in results if self.bib_range and text.isnumeric() and int(text) in range(self.bib_range[0], self.bib_range[1] + 1)]
