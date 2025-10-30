@@ -4,6 +4,7 @@ Face detection and embedding extraction using InsightFace
 
 import cv2
 import numpy as np
+import torch
 from PIL import Image
 from insightface.app import FaceAnalysis
 
@@ -19,7 +20,7 @@ class FaceDetector:
             det_size: Detection size tuple (default: (640, 640))
         """
         print("Loading face detection model...")
-        self.face_app = FaceAnalysis(providers=['CPUExecutionProvider'])
+        self.face_app = FaceAnalysis(providers=['CUDAExecutionProvider']) # if torch.cuda.is_available() else FaceAnalysis(providers=['CPUExecutionProvider'])
         self.face_app.prepare(ctx_id=0, det_size=det_size)
 
     def detect_faces(self, image):
