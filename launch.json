@@ -1,0 +1,8 @@
+        {
+            "name": "Debug main.py",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "args": ["images", "--bib-range", "1000-2000"]
+        }
