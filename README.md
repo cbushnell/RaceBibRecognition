@@ -115,35 +115,8 @@ RaceBibRecognition/
 └── README.md
 ```
 
-## How It Works
-
-1. **OCR Detection**: Scans each image for text regions and identifies bib numbers
-2. **Face Detection**: Detects faces in the image using InsightFace
-3. **Association**: Associates detected bib numbers with nearby faces based on spatial proximity
-4. **Gallery Building**: Builds a gallery of known runners with their face embeddings
-5. **Retroactive Identification**: Re-processes images to identify runners whose bibs weren't initially visible
-6. **Metadata Writing**: Writes all detected bib numbers to IPTC keywords
-7. **Cleanup**: Removes temporary backup files
-
-## Output
-
-- **Exit Code**: Returns 0 on success, 1 on error
-- **Metadata**: Bib numbers written to IPTC keywords field
-- **Statistics**: Prints summary of processed images, identified runners, and errors
-
 ## Requirements
 
 - Python 3.8+
 - CUDA-compatible GPU (optional, for faster processing)
 - Sufficient disk space for model weights (~2-3GB)
-
-## Notes
-
-- First run will download model weights from HuggingFace
-- Processing time depends on image count and hardware
-- Backup files (.bak) are created before modifying image metadata
-- All detected bib numbers are tagged by default, even if not associated with a face
-
-## License
-
-See LICENSE file for details.
